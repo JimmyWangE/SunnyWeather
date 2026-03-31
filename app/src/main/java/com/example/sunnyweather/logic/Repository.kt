@@ -1,28 +1,63 @@
 package com.example.sunnyweather.logic
 
 import androidx.lifecycle.liveData
+import com.example.sunnyweather.logic.dao.PlaceDao
 import com.example.sunnyweather.logic.model.Place
-import com.example.sunnyweather.logic.network.SunnyWeatherNetWork
+import com.example.sunnyweather.logic.model.Weather
+import com.example.sunnyweather.logic.network.SunnyWeatherNetwork
 import kotlinx.coroutines.Dispatchers
-//
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+
 object Repository {
-    //指定成了/Dispatchers.IO，这样代码块中的所有代码就都运行在子线程中了
-    fun searchPlaces(query : String) = liveData(Dispatchers.IO){
-        val resutl = try {
-            val placeResponse = SunnyWeatherNetWork.searchPlaces(query)
-            if (placeResponse.status == "ok" ){
-                val place = placeResponse.places
-                Result.success(place)
-            }else{
-                Result.failure(RuntimeException("response status is" +
-                        "${placeResponse.status}"))
+    fun searchPlaces(query: String) = liveData(Dispatchers.IO) {
+        val result = try {
+            val placeResponse = SunnyWeatherNetwork.searchPlaces(query)
+            if (placeResponse.status == "ok") {
+                Result.success(placeResponse.places)
+            } else {
+                Result.failure(RuntimeException("response status is ${placeResponse.status}"))
             }
-        }catch (e : Exception){
+        } catch (e: Exception) {
             Result.failure<List<Place>>(e)
         }
-        //Result.success()方法来包装获
-        //取的城市数据列表，否则使用Result.failure()方法来包装一个异常信息。最后使用一个
-        //emit()方法将包装的结果发射出去，
-        emit(resutl)
+        emit(result)
     }
+
+    fun refreshWeather(lng: String, lat: String) = liveData(Dispatchers.IO) {
+        val result = try {
+            coroutineScope {
+                val deferredRealtime = async {
+                    SunnyWeatherNetwork.getRealtimeWeather(lng, lat)
+                }
+                val deferredDaily = async {
+                    SunnyWeatherNetwork.getDailyWeather(lng, lat)
+                }
+
+                val realtimeResponse = deferredRealtime.await()
+                val dailyResponse = deferredDaily.await()
+
+                if (realtimeResponse.status == "ok" && dailyResponse.status == "ok") {
+                    val weather = Weather(
+                        realtimeResponse.result.realtime,
+                        dailyResponse.result.daily
+                    )
+                    Result.success(weather)
+                } else {
+                    Result.failure(
+                        RuntimeException(
+                            "realtime response status is ${realtimeResponse.status}, " +
+                                "daily response status is ${dailyResponse.status}"
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure<Weather>(e)
+        }
+        emit(result)
+    }
+    fun savePlace(place: Place) = PlaceDao.savePlace(place)
+    fun getSavedPlace() = PlaceDao.getSavedPlace()
+    fun isPlaceSaved() = PlaceDao.isPlaceSaved()
 }
